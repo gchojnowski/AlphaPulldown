@@ -52,7 +52,8 @@ def remove_keys_from_pickle(file_path, keys_to_remove):
 
 def post_prediction_process(output_path, compress_pickles=False, remove_pickles=False, remove_keys=False):
     """Process resulted files after the prediction."""
-    keys_to_remove = ['aligned_confidence_probs', 'distogram', 'masked_msa']
+    print("=====> INFO: keeping distograms")
+    keys_to_remove = ['aligned_confidence_probs', 'masked_msa']
 
     try:
         # Get the best model from ranking_debug.json
