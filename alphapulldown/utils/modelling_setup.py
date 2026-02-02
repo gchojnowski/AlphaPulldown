@@ -134,6 +134,12 @@ def create_uniprot_runner(jackhmmer_binary_path, uniprot_database_path):
         binary_path=jackhmmer_binary_path, database_path=uniprot_database_path
     )
 
+def create_uniref_runner(jackhmmer_binary_path, uniref_database_path):
+    """create a uniref runner object"""
+    return jackhmmer.Jackhmmer(
+        binary_path=jackhmmer_binary_path, database_path=uniref_database_path
+    )
+
 
 def check_empty_templates(feature_dict: dict) -> bool:
     """A function to check wether the pickle has empty templates"""

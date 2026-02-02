@@ -100,6 +100,7 @@ flags.DEFINE_enum('db_preset', 'full_dbs', ['full_dbs', 'reduced_dbs'], '')
 flags.DEFINE_boolean('use_precomputed_msas', False, '')
 flags.DEFINE_boolean('re_search_templates_mmseqs2', False, '')
 flags.DEFINE_bool("use_mmseqs2", False, "")
+flags.DEFINE_bool("use_afdb", False, "")
 flags.DEFINE_bool("save_msa_files", False, "")
 flags.DEFINE_bool("skip_existing", False, "")
 flags.DEFINE_string("new_uniclust_dir", None, "")
@@ -227,6 +228,11 @@ def create_individual_features():
     if FLAGS.use_mmseqs2:
         pipeline = None
         uniprot_runner = None
+    elif FLAGS.use_afdb: # UGLY, but works :) we need the runner to template search only
+        pipeline = create_pipeline_af2()
+        uniprot_runner = create_uniprot_runner(
+            FLAGS.jackhmmer_binary_path, FLAGS.uniref90_database_path
+        )
     else:
         pipeline = create_pipeline_af2()
         uniprot_runner = create_uniprot_runner(
@@ -261,7 +267,14 @@ def create_and_save_monomer_objects(monomer, pipeline):
         with open(metadata_output_path, "w") as meta_data_outfile:
             json.dump(meta_dict, meta_data_outfile)
     if FLAGS.use_mmseqs2:
-        monomer.make_mmseq_features(DEFAULT_API_SERVER=DEFAULT_API_SERVER, output_dir=FLAGS.output_dir, use_precomputed_msa=FLAGS.use_precomputed_msas, use_templates=FLAGS.re_search_templates_mmseqs2)
+        monomer.make_mmseq_features(DEFAULT_API_SERVER=DEFAULT_API_SERVER,
+                                    output_dir=FLAGS.output_dir,
+                                    use_precomputed_msa=FLAGS.use_precomputed_msas,
+                                    use_templates=FLAGS.re_search_templates_mmseqs2)
+
+    elif FLAGS.use_afdb: #gchojnowski
+        monomer.make_afdb_features(pipeline=pipeline,
+                                   output_dir=FLAGS.output_dir)
     else:
         monomer.make_features(
             pipeline=pipeline, output_dir=FLAGS.output_dir,

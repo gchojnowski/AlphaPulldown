@@ -13,6 +13,7 @@ from alphafold.data.tools import jackhmmer
 from alphafold.data import parsers
 from alphafold.data import pipeline_multimer
 from alphafold.data import pipeline
+from alphafold.data import pipeline as ppl
 from alphafold.data import msa_pairing
 from alphafold.data import feature_processing
 from pathlib import Path as plPath
@@ -21,6 +22,40 @@ from colabfold.batch import get_msa_and_templates, msa_to_str, build_monomer_fea
 from alphapulldown.utils.multimeric_template_utils import (extract_multimeric_template_features_for_single_chain,
                                                      prepare_multimeric_template_meta_info)
 from alphapulldown.utils.file_handling import temp_fasta_file
+import requests
+
+
+def download_afdb_msa_a3m(uniprot_acc: str, out_path: str | None = None, versions=(6, 5, 4)) -> str:
+    """
+    Download AlphaFold DB MSA (.a3m) for a UniProt accession if available.
+    Tries URLs like:
+      https://alphafold.ebi.ac.uk/files/msa/AF-<ACC>-F1-msa_v6.a3m
+    """
+
+    base = "https://alphafold.ebi.ac.uk/files/msa"
+    acc = uniprot_acc.strip()
+
+    session = requests.Session()
+    session.headers.update({"User-Agent": "msa-downloader/1.0 (+https://example.org/)"})
+
+    tried = []
+    for v in versions:
+        url = f"{base}/AF-{acc}-F1-msa_v{v}.a3m"
+        tried.append(url)
+
+        r = session.head(url, allow_redirects=True, timeout=30)
+        if r.status_code == 200:
+            r2 = session.get(url, allow_redirects=True, timeout=120)
+            r2.raise_for_status()
+
+            if out_path is None:
+                out_path = f"{acc}.a3m"
+            with open(out_path, "wb") as f:
+                f.write(r2.content)
+
+            return url
+
+    raise FileNotFoundError(f"No MSA found for {acc}. Tried:\n" + "\n".join(tried))
 
 class MonomericObject:
     """
@@ -268,6 +303,94 @@ class MonomericObject:
         if using_zipped_msa_files:
             MonomericObject.zip_msa_files(output_dir)
 
+    # ----------------- gchojnowski
+
+    def make_afdb_features(
+            self, pipeline,
+            output_dir=None,
+            compress_msa_files=False,
+            use_precomputed_msa=False,
+            use_templates=True):
+
+        """
+        A method to use MSAs from ALphaFold DB and local template search
+        """
+
+        os.makedirs(output_dir, exist_ok=True)
+        using_zipped_msa_files = MonomericObject.unzip_msa_files(output_dir)
+
+        a3m_path = os.path.join(output_dir, self.description + ".a3m")
+
+        url = download_afdb_msa_a3m(self.description, a3m_path)
+        logging.info(f"Downloaded precomputed MSA for {self.description} from: {url}")
+        logging.info(f"Using precomputed MSA from {a3m_path}")
+
+        a3m_lines = [plPath(a3m_path).read_text()]
+        (unpaired_msa, paired_msa, query_seqs_unique, query_seqs_cardinality, template_features) = unserialize_msa(a3m_lines, self.sequence)
+
+        if use_templates == True : #Search templates using new MSA
+            sequence_str = f">{self.description}\n{self.sequence}"
+            with temp_fasta_file(sequence_str) as fasta_file:
+                jackhmmer_uniref90_result = ppl.run_msa_tool(
+                    msa_runner=self._uniprot_runner,
+                    input_fasta_path=fasta_file,
+                    msa_out_path=os.path.join(output_dir, self.description + "_uniref90.sto"),
+                    msa_format='sto',
+                    use_precomputed_msas=True,
+                    max_sto_sequences=10000,
+                )
+
+            msa_for_templates = jackhmmer_uniref90_result['sto']
+            msa_for_templates = parsers.deduplicate_stockholm_msa(msa_for_templates)
+            msa_for_templates = parsers.remove_empty_columns_from_stockholm_msa(
+                msa_for_templates
+            )
+
+            if pipeline.template_searcher.input_format == 'sto':
+                pdb_templates_result = pipeline.template_searcher.query(msa_for_templates)
+            elif self.template_searcher.input_format == 'a3m':
+                uniref90_msa_as_a3m = parsers.convert_stockholm_to_a3m(msa_for_templates)
+                pdb_templates_result = pipeline.template_searcher.query(uniref90_msa_as_a3m)
+
+            #pdb_templates_result = pipeline.template_searcher.query(a3m_lines[0])
+            pdb_template_hits = pipeline.template_searcher.get_template_hits(
+                    output_string=pdb_templates_result, input_sequence=self.sequence)
+
+            templates_result = pipeline.template_featurizer.get_templates(
+                    query_sequence=self.sequence, hits=pdb_template_hits)
+
+        # Remove header lines starting with '#' if present.
+        a3m_lines[0] = "\n".join([line for line in a3m_lines[0].splitlines() if not line.startswith("#")])
+        self.feature_dict = build_monomer_feature(self.sequence, unpaired_msa[0], templates_result.features)
+
+        # Add extra features to make it compatible with pickle features obtaiend from mmseqs2
+        template_confidence_scores = self.feature_dict.get('template_confidence_scores', None)
+        template_release_date = self.feature_dict.get('template_release_date', None)
+        if template_confidence_scores is None:
+            self.feature_dict.update(
+                {'template_confidence_scores': np.array([[1] * len(self.sequence)])}
+            )
+        if template_release_date is None:
+            self.feature_dict.update({"template_release_date" : np.array(['none'])})
+
+
+        # Fix: Change tuple to list so that we can concatenate with msa_pairing.MSA_FEATURES.
+        valid_feats = msa_pairing.MSA_FEATURES + ("msa_species_identifiers", "msa_uniprot_accession_identifiers")
+        feats = {f"{k}_all_seq": v for k, v in self.feature_dict.items() if k in valid_feats}
+
+        # Add default template confidence and release date if missing.
+        if self.feature_dict.get('template_confidence_scores', None) is None:
+            self.feature_dict.update({'template_confidence_scores': np.array([[1] * len(self.sequence)])})
+        if self.feature_dict.get('template_release_date', None) is None:
+            self.feature_dict.update({"template_release_date": ['none']})
+        self.feature_dict.update(feats)
+
+        if using_zipped_msa_files:
+            MonomericObject.zip_msa_files(output_dir)
+
+
+    # ----------------- gchojnowski
+    # ----------------- gchojnowski
 
 class ChoppedObject(MonomericObject):
     """A monomeric object chopped into specified regions."""
