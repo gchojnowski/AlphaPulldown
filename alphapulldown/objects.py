@@ -23,7 +23,7 @@ from alphapulldown.utils.multimeric_template_utils import (extract_multimeric_te
                                                      prepare_multimeric_template_meta_info)
 from alphapulldown.utils.file_handling import temp_fasta_file
 import requests
-
+from tempfile import TemporaryDirectory
 
 def download_afdb_msa_a3m(uniprot_acc: str, out_path: str | None = None, versions=(6, 5, 4)) -> str:
     """
@@ -356,7 +356,22 @@ class MonomericObject:
             pdb_template_hits = pipeline.template_searcher.get_template_hits(
                     output_string=pdb_templates_result, input_sequence=self.sequence)
 
-            templates_result = pipeline.template_featurizer.get_templates(
+            # download required PDB files into a tmp dir
+            pdb_hits = set([_h.name.split('_')[0] for _h in pdb_template_hits])
+            with TemporaryDirectory(prefix="pdb_mmcif_") as tmpdir:
+                for _pid in pdb_hits:
+                    pdb_id = _pid.lower()
+
+                    url = f"https://files.rcsb.org/download/{pdb_id}.cif"
+                    cif_path = plPath(tmpdir) / f"{pdb_id}.cif"
+
+                    r = requests.get(url, timeout=30)
+                    r.raise_for_status()
+                    cif_path.write_bytes(r.content)
+                    logging.info(f"Downloaded mmCIF from {url}")
+
+                pipeline.template_featurizer._mmcif_dir=tmpdir
+                templates_result = pipeline.template_featurizer.get_templates(
                     query_sequence=self.sequence, hits=pdb_template_hits)
 
         # Remove header lines starting with '#' if present.
