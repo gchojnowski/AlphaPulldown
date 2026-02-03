@@ -316,8 +316,6 @@ class MonomericObject:
         A method to use MSAs from ALphaFold DB and local template search
         """
 
-
-
         if plPath(os.path.join(output_dir, self.description + ".pkl")).exists() or \
               plPath(os.path.join(output_dir, self.description + ".pkl.xz")).exists():
             logging.info(f"Found existing pkl file for {self.description} in {output_dir}")
@@ -326,46 +324,44 @@ class MonomericObject:
         os.makedirs(output_dir, exist_ok=True)
         using_zipped_msa_files = MonomericObject.unzip_msa_files(output_dir)
 
-        a3m_path = os.path.join(output_dir, self.description + ".a3m")
+        with TemporaryDirectory(prefix=f"{self.description}_features_") as tmpdir:
+            a3m_path = os.path.join(tmpdir, self.description + ".a3m")
 
-        url = download_afdb_msa_a3m(self.description, a3m_path)
-        logging.info(f"Downloaded precomputed MSA for {self.description} from: {url}")
-        logging.info(f"Using precomputed MSA from {a3m_path}")
+            url = download_afdb_msa_a3m(self.description, a3m_path)
+            logging.info(f"Downloaded precomputed MSA for {self.description} from: {url}")
+            logging.info(f"Using precomputed MSA from {a3m_path}")
 
-        a3m_lines = [plPath(a3m_path).read_text()]
-        (unpaired_msa, paired_msa, query_seqs_unique, query_seqs_cardinality, template_features) = unserialize_msa(a3m_lines, self.sequence)
+            a3m_lines = [plPath(a3m_path).read_text()]
+            (unpaired_msa, paired_msa, query_seqs_unique, query_seqs_cardinality, template_features) = unserialize_msa(a3m_lines, self.sequence)
 
-        if use_templates == True : #Search templates using new MSA
-            sequence_str = f">{self.description}\n{self.sequence}"
-            with temp_fasta_file(sequence_str) as fasta_file:
-                jackhmmer_uniref90_result = ppl.run_msa_tool(
-                    msa_runner=self._uniprot_runner,
-                    input_fasta_path=fasta_file,
-                    msa_out_path=os.path.join(output_dir, self.description + "_uniref90.sto"),
-                    msa_format='sto',
-                    use_precomputed_msas=True,
-                    max_sto_sequences=10000,
-                )
+            if use_templates == True : #Search templates using new MSA
+                sequence_str = f">{self.description}\n{self.sequence}"
+                with temp_fasta_file(sequence_str) as fasta_file:
+                    jackhmmer_uniref90_result = ppl.run_msa_tool(
+                        msa_runner=self._uniprot_runner,
+                        input_fasta_path=fasta_file,
+                        msa_out_path=os.path.join(tmpdir, self.description + "_uniref90.sto"),
+                        msa_format='sto',
+                        use_precomputed_msas=True,
+                        max_sto_sequences=10000,
+                    )
 
-            msa_for_templates = jackhmmer_uniref90_result['sto']
-            msa_for_templates = parsers.deduplicate_stockholm_msa(msa_for_templates)
-            msa_for_templates = parsers.remove_empty_columns_from_stockholm_msa(
-                msa_for_templates
-            )
+                msa_for_templates = jackhmmer_uniref90_result['sto']
+                msa_for_templates = parsers.deduplicate_stockholm_msa(msa_for_templates)
+                msa_for_templates = parsers.remove_empty_columns_from_stockholm_msa(msa_for_templates)
 
-            if pipeline.template_searcher.input_format == 'sto':
-                pdb_templates_result = pipeline.template_searcher.query(msa_for_templates)
-            elif self.template_searcher.input_format == 'a3m':
-                uniref90_msa_as_a3m = parsers.convert_stockholm_to_a3m(msa_for_templates)
-                pdb_templates_result = pipeline.template_searcher.query(uniref90_msa_as_a3m)
+                if pipeline.template_searcher.input_format == 'sto':
+                    pdb_templates_result = pipeline.template_searcher.query(msa_for_templates)
+                elif self.template_searcher.input_format == 'a3m':
+                    uniref90_msa_as_a3m = parsers.convert_stockholm_to_a3m(msa_for_templates)
+                    pdb_templates_result = pipeline.template_searcher.query(uniref90_msa_as_a3m)
 
-            #pdb_templates_result = pipeline.template_searcher.query(a3m_lines[0])
-            pdb_template_hits = pipeline.template_searcher.get_template_hits(
-                    output_string=pdb_templates_result, input_sequence=self.sequence)
+                #pdb_templates_result = pipeline.template_searcher.query(a3m_lines[0])
+                pdb_template_hits = pipeline.template_searcher.get_template_hits(
+                        output_string=pdb_templates_result, input_sequence=self.sequence)
 
-            # download required PDB files into a tmp dir
-            pdb_hits = set([_h.name.split('_')[0] for _h in pdb_template_hits])
-            with TemporaryDirectory(prefix="pdb_mmcif_") as tmpdir:
+                # download required PDB files into a tmp dir
+                pdb_hits = set([_h.name.split('_')[0] for _h in pdb_template_hits])
                 for _pid in pdb_hits:
                     pdb_id = _pid.lower()
 

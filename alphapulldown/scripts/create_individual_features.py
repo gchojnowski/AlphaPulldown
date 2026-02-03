@@ -29,6 +29,7 @@ from alphapulldown.objects import MonomericObject
 from alphapulldown.utils.file_handling import iter_seqs, parse_csv_file
 from alphapulldown.utils.modelling_setup import create_uniprot_runner
 from alphapulldown.utils import save_meta_data
+from types import SimpleNamespace
 
 # Try to import AlphaFold3, but it's optional
 try:
@@ -122,12 +123,12 @@ def get_database_path(key):
     """Return the absolute path for a given database key, depending on pipeline."""
     # When using MMseqs2 remotely (current implementation), data_dir is not required
     # Note: Local MMseqs2 would require data_dir, but current implementation uses remote
-    if FLAGS.use_mmseqs2 and not FLAGS.data_dir:
+    if (FLAGS.use_mmseqs2 or FLAGS.use_afdb) and not FLAGS.data_dir:
         return None
     
     # For non-MMseqs2 or when data_dir is provided, data_dir must be valid
     if not FLAGS.data_dir:
-        raise ValueError("data_dir is required when not using MMseqs2")
+        raise ValueError("data_dir is required when not using MMseqs2 or AFDB")
     
     db_map = AF3_DATABASES if FLAGS.data_pipeline == 'alphafold3' else AF2_DATABASES
     default_subpath = db_map[key]
@@ -184,6 +185,20 @@ def create_pipeline_af2():
     if FLAGS.use_mmseqs2:
         template_searcher = None
         template_featuriser = None
+    elif FLAGS.use_afdb:
+        template_featuriser = templates.HmmsearchHitFeaturizer(
+            mmcif_dir=FLAGS.template_mmcif_dir, max_template_date=FLAGS.max_template_date,
+            max_hits=20, kalign_binary_path=FLAGS.kalign_binary_path,
+            obsolete_pdbs_path=FLAGS.obsolete_pdbs_path, release_dates_path=None
+        )
+        template_searcher = hmmsearch.Hmmsearch(
+            binary_path=FLAGS.hmmsearch_binary_path,
+            hmmbuild_binary_path=FLAGS.hmmbuild_binary_path,
+            database_path=FLAGS.pdb_seqres_database_path
+        )
+        _pip = SimpleNamespace(template_searcher=template_searcher,
+                                       template_featurizer=template_featuriser)
+        return _pip
     else:
         if FLAGS.use_hhsearch:
             template_searcher = hhsearch.HHSearch(
@@ -205,6 +220,10 @@ def create_pipeline_af2():
                 hmmbuild_binary_path=FLAGS.hmmbuild_binary_path,
                 database_path=FLAGS.pdb_seqres_database_path
             )
+            if FLAGS.use_afdb:
+                _pip = SimpleNamespace(template_searcher=template_searcher,
+                                       template_featurizer=template_featuriser)
+                return _pip
     
     return AF2DataPipeline(
         jackhmmer_binary_path=FLAGS.jackhmmer_binary_path,
@@ -431,15 +450,15 @@ def main(argv):
     
     # Validate required flags based on configuration
     required_flags = ["fasta_paths", "output_dir", "max_template_date"]
-    if not FLAGS.use_mmseqs2:
+    if not (FLAGS.use_mmseqs2 or FLAGS.use_afdb):
         required_flags.append("data_dir")
     
     # Check if all required flags are provided
     for flag_name in required_flags:
         if not getattr(FLAGS, flag_name):
             logging.error(f"Required flag --{flag_name} is not provided.")
-            if flag_name == "data_dir" and FLAGS.use_mmseqs2:
-                logging.error("When using --use_mmseqs2, the --data_dir flag is not required as databases are accessed remotely.")
+            if flag_name == "data_dir" and (FLAGS.use_mmseqs2 or FLAGS.use_afdb):
+                logging.error("When using --use_mmseqs2 or --use_afdb, the --data_dir flag is not required as databases are accessed remotely.")
             sys.exit(1)
     
     Path(FLAGS.output_dir).mkdir(parents=True, exist_ok=True)
