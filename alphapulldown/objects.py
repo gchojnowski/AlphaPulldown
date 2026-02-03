@@ -316,6 +316,13 @@ class MonomericObject:
         A method to use MSAs from ALphaFold DB and local template search
         """
 
+
+
+        if plPath(os.path.join(output_dir, self.description + ".pkl")).exists() or \
+              plPath(os.path.join(output_dir, self.description + ".pkl.xz")).exists():
+            logging.info(f"Found existing pkl file for {self.description} in {output_dir}")
+            return
+
         os.makedirs(output_dir, exist_ok=True)
         using_zipped_msa_files = MonomericObject.unzip_msa_files(output_dir)
 
