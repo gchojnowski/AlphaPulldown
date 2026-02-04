@@ -362,17 +362,19 @@ class MonomericObject:
 
                 # download required PDB files into a tmp dir
                 #pdb_hits = set([_h.name.split('_')[0] for _h in pdb_template_hits])
-                # limit search to the top 100 hits
+                # limit search up to 100 mmcifs
                 sorted_pdb_template_hits = (
                             sorted(hits, key=lambda x: x.sum_probs, reverse=True)
                             if pdb_template_hits and pdb_template_hits[0].sum_probs is not None
                             else pdb_template_hits
                         )
 
-                pdb_template_hits = sorted_pdb_template_hits[:100]
-                pdb_hits = set([_h.name.split('_')[0] for _h in pdb_template_hits])
-
-                logging.info(f"Template hits {len(pdb_template_hits)} in {len(pdb_hits)} models")
+                pdb_template_hits = sorted_pdb_template_hits
+                while True:
+                    pdb_hits = set([_h.name.split('_')[0] for _h in pdb_template_hits])
+                    logging.info(f"Template hits {len(pdb_template_hits)} in {len(pdb_hits)} models")
+                    if len(pdb_hits)<100: break
+                    pdb_template_hits = pdb_template_hits[:10]
 
                 for _pid in pdb_hits:
                     pdb_id = _pid.lower()
