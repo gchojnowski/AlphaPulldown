@@ -363,6 +363,7 @@ class MonomericObject:
                 # download required PDB files into a tmp dir
                 #pdb_hits = set([_h.name.split('_')[0] for _h in pdb_template_hits])
                 # limit search to the top 100 hits
+                logging.info(f"Template hits {len(pdb_template_hits)}")
                 pdb_template_hits = [_h for _h in sorted(pdb_template_hits, key=lambda x: x.sum_probs, reverse=True)][:100]
                 pdb_hits = [_h.name.split('_')[0] for _h in pdb_template_hits]
 
