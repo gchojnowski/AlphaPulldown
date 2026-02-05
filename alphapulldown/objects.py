@@ -836,7 +836,7 @@ create_individual_features.py
         for chain_id, fasta_chain in self.chain_id_map.items():
             chain_features = self.interactors[count].feature_dict
             chain_features['sequence']=np.array([fasta_chain.sequence.encode('utf-8')], dtype=np.object_)
-            chain_features['seq_length'] = len(fasta_chain.sequence)
+            chain_features['seq_length'] = np.array([len(fasta_chain.sequence)], dtype=np.object_) 
         
             chain_features = pipeline_multimer.convert_monomer_features(
                 chain_features, chain_id
