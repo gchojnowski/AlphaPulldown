@@ -13,6 +13,10 @@ from scipy.cluster.hierarchy import linkage, leaves_list, fcluster, dendrogram
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
+
+from alphapulldown.utils.distogram_parser import distogram_parser
+
+
 def compress_file(file_path):
     """Compress a single file with gzip."""
     logging.info(f"Compressing file: {file_path}")
@@ -151,7 +155,7 @@ def cluster_and_reorder(dist, t=0.2):
     biggest = np.argmax(sizes)
     members = np.where(labels == biggest)[0]
     if len(members) > 1:
-        sims = 1 - dists[np.ix_(members, members)]
+        sims = 1 - dist[np.ix_(members, members)]
         iu = np.triu_indices(len(members), k=1)
         consistency = sims[iu].mean()
     else:
@@ -187,7 +191,7 @@ def post_prediction_process(output_path, compress_pickles=False, remove_pickles=
     corr_reordered, order, labels, largest_cluster_frac, consistency = cluster_and_reorder(dists, t=0.2)
     clusters = clusters_from_labels(labels, order)
 
-    print(f" Clusters {'+'.join(['.'.join(map(str,_)) for _ in clusters])} # {len(clusters)} largest_frac {largest_cluster_frac} consistency {consistency}")
+    print(f" Clusters {'+'.join(['.'.join(map(str,_)) for _ in clusters])} # {len(clusters)} largest_frac {largest_cluster_frac:.2f} consistency {consistency:.3f}")
 
     contact_dict['largest_cluster_frac']=largest_cluster_frac
     contact_dict['consistency']=consistency
@@ -219,6 +223,12 @@ def post_prediction_process(output_path, compress_pickles=False, remove_pickles=
         plt.tight_layout()
         plt.savefig(os.path.join(output_path, "clusters.png"))
         plt.close()
+
+    do=distogram_parser()
+    contacts = do.get_contacts(output_path, verbose=1)
+    print(f"Saving {output_path}/contacts.json with {len(contacts)} contacts")
+    with Path(output_path, 'contacts.json').open('w') as ofile:
+        ofile.write(json.dumps(contacts))
 
     try:
         # Get the best model from ranking_debug.json

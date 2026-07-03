@@ -21,13 +21,13 @@ class distogram_parser:
     def __init__(self):
         pass
 
-    def get_contacts(self, directory, distance=8, pbtycutoff=0.8, cross_only=True, verbose=False):
+    def get_contacts(self, datadir, distance=8, pbtycutoff=0.8, cross_only=True, verbose=False):
         """
             selects from datadir a pkl/distogram corresponding to a top-ranked model 
         """
 
         top_ranked_dgram = (None, None, 0.0)
-        for fn in glob.glob(os.path.join(datadir, "*.pkl")):
+        for fn in glob.glob(os.path.join(datadir, "result_model_*.pkl")):
             with open(fn, 'rb') as ifile:
                 d=pickle.load(ifile)
             if d.get('ranking_confidence',0)>top_ranked_dgram[-1]:
@@ -36,16 +36,18 @@ class distogram_parser:
         if top_ranked_dgram[0] is None: return []
 
         if verbose:
-            print(f"Selected {os.path.basename(top_ranked_dgram[0])} with ranking confidence {top_ranked_drgam[-1]:.2f}")
+            print(f"Selected {os.path.basename(top_ranked_dgram[0])} with ranking confidence {top_ranked_dgram[-1]:.2f}")
 
         d = top_ranked_dgram[1]
 
         # reparse top ditogram; avoids storing all pickles in memory         
         with open(fn, 'rb') as ifile:
-            d=pickle.load(ifile)   
+            d=pickle.load(ifile)
+
         chain_ids = string.ascii_uppercase
         asym_id=[]
         chain_lens = []
+
         for _idx,_seq in enumerate(d['seqs']):
             asym_id.extend([_idx+1]*len(_seq))
             chain_lens.append(len(_seq))
@@ -79,9 +81,9 @@ class distogram_parser:
             cj = int(asym_id[j]-1)
 
             # skipp: self, intra-chain (default), and symm
-            if i==j: continue
+            #if i==j: continue
             if cross_only and ci==cj: continue
-            if ci>cj: continue
+            if ci>=cj: continue
 
             reli = 1+i-sum(chain_lens[:ci])
             relj = 1+j-sum(chain_lens[:cj])
@@ -89,7 +91,7 @@ class distogram_parser:
 
             if verbose: print(f"{reli:-4d}/{chain_ids[ci]} {relj:-4d}/{chain_ids[cj]} {below_dist_pbty[i,j]:5.2f}")
 
-            requested_contacts.append([(reli,chain_ids[ci]), (relj,chain_ids[cj]),  below_dist_pbty[i,j]])
+            requested_contacts.append([(int(reli),chain_ids[ci]), (int(relj),chain_ids[cj]),  float(below_dist_pbty[i,j])])
 
         return(requested_contacts)
 
