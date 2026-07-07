@@ -38,11 +38,6 @@ class distogram_parser:
 
         if top_ranked_dgram[0] is None: return []
 
-        # Now remove all the original (large) pickles, including the top one
-        for p in all_pickles:
-            Path(p).unlink()
-            print(f"Removed {p}")
-        
         if verbose:
             print(f"Selected {os.path.basename(top_ranked_dgram[0])} with ranking confidence {top_ranked_dgram[-1]:.2f}")
 
@@ -52,12 +47,18 @@ class distogram_parser:
         with open(fn, 'rb') as ifile:
             d=pickle.load(ifile)
 
+        # Now remove all the original (large) pickles, including the top one
+        #for p in all_pickles:
+        #    Path(p).unlink()
+        #    print(f"Removed {p}")
+
+
         chain_ids = string.ascii_uppercase
         asym_id=[]
         chain_lens = []
 
         for _idx,_seq in enumerate(d['seqs']):
-            asym_id.extend([_idx+1]*len(_seq))
+            asym_id.extend([_idx]*len(_seq))
             chain_lens.append(len(_seq))
         chain_lens = np.array(chain_lens)
 
@@ -82,7 +83,7 @@ class distogram_parser:
 
         # save flattened distogram
         output_dict = {'below8pbty':below_dist_pbty, 's':chain_lens, 'asym_id':asym_id, 'chain_ids':chain_ids}
-        out_fn = os.patyh.join(datadir, f"flat_distogram.pkl")
+        out_fn = os.path.join(datadir, f"flat_distogram.pkl")
         with open(out_fn, "wb") as f:
             pickle.dump(output_dict, f)
         
@@ -91,8 +92,8 @@ class distogram_parser:
         resi_i,resi_j = np.where(below_dist_pbty>pbtycutoff)
         for i,j in zip(resi_i, resi_j):
 
-            ci = int(asym_id[i]-1)
-            cj = int(asym_id[j]-1)
+            ci = int(asym_id[i])
+            cj = int(asym_id[j])
 
             # skipp: self, intra-chain (default), and symm
             #if i==j: continue
@@ -103,7 +104,7 @@ class distogram_parser:
             relj = 1+j-sum(chain_lens[:cj])
 
 
-            if verbose: print(f"{reli:-4d}/{chain_ids[ci]} {relj:-4d}/{chain_ids[cj]} {below_dist_pbty[i,j]:5.2f}")
+            print(f"{reli:-4d}/{chain_ids[ci]} {relj:-4d}/{chain_ids[cj]} {below_dist_pbty[i,j]:5.2f}")
 
             requested_contacts.append([(int(reli),chain_ids[ci]), (int(relj),chain_ids[cj]),  float(below_dist_pbty[i,j])])
 
