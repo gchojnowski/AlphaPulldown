@@ -97,22 +97,41 @@ def extract_contacts_from_pickle(file_path):
     bin_idx=np.max(np.where(bin_edges<8))
     below8pbty = np.sum(probs, axis=2, where=(np.arange(probs.shape[-1])<bin_idx))
 
+    import string
+    chain_ids = string.ascii_uppercase
+    chain_lens = []
+    for _seq in enumerate(data['seqs']):
+        chain_lens.append(len(_seq))
+        
+    # save flattened distogram
+    output_dict = {'below8pbty':below8pbty, 's':chain_lens, 'asym_id':asym_id, 'chain_ids':chain_ids}
+    out_fn = result_dir / f"flat_distogram.pkl"
+    with open(out_fn, "wb") as f:
+        pickle.dump(output_dict, f)
+        
     resi_i,resi_j = np.where(below8pbty>0.8)
-    contacts=[]
+    requested_contacts=[]
     for i,j in zip(resi_i, resi_j):
 
-        try:
-            ci = int(asym_id[i]-1)
-            cj = int(asym_id[j]-1)
-        except:
-            print('ERROR')
-            continue
+        ci = int(asym_id[i])
+        cj = int(asym_id[j])
 
-        if ci<cj:
-            contacts.append((int(i),int(j)))
+        # skipp: close, diag, and symm
+        if ci>=cj: continue
 
+        reli = 1+i-sum(chain_lens[:ci])
+        relj = 1+j-sum(chain_lens[:cj])
 
-    datadict['contacts']=contacts
+        requested_contacts.append(f"{reli}/{chain_ids[ci]} {relj}/{chain_ids[cj]} {below8pbty[i,j]}")
+
+        print(f"{reli:-4d}/{chain_ids[ci]} {relj:-4d}/{chain_ids[cj]} {below8pbty[i,j]:5.2f}")
+
+    contacts_file = result_dir / "contacts.json"
+    print(f"Saving {contacts_file} with {len(requested_contacts)} contacts")
+    with contacts_file.open('w') as ofile:
+        ofile.write(json.dumps(requested_contacts))
+
+    datadict['contacts']=requested_contacts
 
 
     # most-likely cross-chain contacts (<8A)
