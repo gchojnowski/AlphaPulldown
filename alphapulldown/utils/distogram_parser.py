@@ -8,6 +8,7 @@ import pickle, glob
 import os
 import numpy as np
 import string
+from pathlib import Path
 
 class distogram_parser:
     """
@@ -26,8 +27,10 @@ class distogram_parser:
             selects from datadir a pkl/distogram corresponding to a top-ranked model 
         """
 
+        all_pickles = glob.glob(os.path.join(datadir, "result_model_*.pkl"))
+
         top_ranked_dgram = (None, None, 0.0)
-        for fn in glob.glob(os.path.join(datadir, "result_model_*.pkl")):
+        for fn in all_pickles:
             with open(fn, 'rb') as ifile:
                 d=pickle.load(ifile)
             if d.get('ranking_confidence',0)>top_ranked_dgram[-1]:
@@ -35,6 +38,11 @@ class distogram_parser:
 
         if top_ranked_dgram[0] is None: return []
 
+        # Now remove all the original (large) pickles, including the top one
+        for p in all_pickles:
+            Path(p).unlink()
+            print(f"Removed {p}")
+        
         if verbose:
             print(f"Selected {os.path.basename(top_ranked_dgram[0])} with ranking confidence {top_ranked_dgram[-1]:.2f}")
 
@@ -72,6 +80,12 @@ class distogram_parser:
 
         below_dist_pbty = np.sum(probs, axis=2, where=(np.arange(probs.shape[-1])<bin_idx))
 
+        # save flattened distogram
+        output_dict = {'below8pbty':below_dist_pbty, 's':chain_lens, 'asym_id':asym_id, 'chain_ids':chain_ids}
+        out_fn = os.patyh.join(datadir, f"flat_distogram.pkl")
+        with open(out_fn, "wb") as f:
+            pickle.dump(output_dict, f)
+        
         requested_contacts=[]
 
         resi_i,resi_j = np.where(below_dist_pbty>pbtycutoff)
