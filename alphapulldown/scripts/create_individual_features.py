@@ -169,6 +169,19 @@ def create_arguments(local_custom_template_db=None):
         FLAGS.pdb_seqres_database_path = FLAGS.pdb_seqres_database_path or get_database_path("pdb_seqres")
         FLAGS.template_mmcif_dir = FLAGS.template_mmcif_dir or get_database_path("template_mmcif_dir")
         FLAGS.obsolete_pdbs_path = FLAGS.obsolete_pdbs_path or get_database_path("obsolete_pdbs")
+        if FLAGS.data_pipeline == "alphafold2":
+            # Only the databases this run searches: reduced_dbs uses small BFD
+            # instead of BFD + UniRef30, and PDB70 is only for --use_hhsearch.
+            # Unused paths would otherwise end up in the metadata, which reads
+            # (and fails on) files that a reduced installation does not have.
+            # Paths given explicitly on the command line are kept.
+            if FLAGS.db_preset == "reduced_dbs":
+                if not FLAGS["bfd_database_path"].present:
+                    FLAGS.bfd_database_path = None
+                if not FLAGS["uniref30_database_path"].present:
+                    FLAGS.uniref30_database_path = None
+            if not FLAGS.use_hhsearch and not FLAGS["pdb70_database_path"].present:
+                FLAGS.pdb70_database_path = None
     
     if FLAGS.fetch_templates or FLAGS.use_afdb:
         # Templates come from RCSB on demand: template_mmcif_dir is a download

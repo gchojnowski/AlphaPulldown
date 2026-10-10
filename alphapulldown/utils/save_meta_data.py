@@ -178,7 +178,14 @@ def parse_version(output):
 
 
 def get_hash(filename):
-    """Get the md5 hash of a file."""
+    """Get the md5 hash of a file; None (with a warning) if it is missing.
+
+    Metadata must never stop a run: a database that is configured but not
+    installed is recorded without a version instead of raising.
+    """
+    if not os.path.isfile(filename):
+        logging.warning(f"Cannot hash {filename}: file not found; version left empty")
+        return None
     md5_hash = hashlib.md5()
     with open(filename, "rb") as f:
         # Read and update hash in chunks of 4K
