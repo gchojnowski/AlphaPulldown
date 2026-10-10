@@ -334,7 +334,10 @@ class MonomericObject:
             a3m_lines = [plPath(a3m_path).read_text()]
             (unpaired_msa, paired_msa, query_seqs_unique, query_seqs_cardinality, template_features) = unserialize_msa(a3m_lines, self.sequence)
 
-            if use_templates == True : #Search templates using new MSA
+            # Without a template search, keep the placeholder template that
+            # unserialize_msa produced (as the MMseqs2 path does).
+            template_feature_dict = template_features[0]
+            if use_templates:
                 sequence_str = f">{self.description}\n{self.sequence}"
                 with temp_fasta_file(sequence_str) as fasta_file:
                     jackhmmer_uniref90_result = ppl.run_msa_tool(
@@ -350,50 +353,28 @@ class MonomericObject:
                 msa_for_templates = parsers.deduplicate_stockholm_msa(msa_for_templates)
                 msa_for_templates = parsers.remove_empty_columns_from_stockholm_msa(msa_for_templates)
 
-                if pipeline.template_searcher.input_format == 'sto':
-                    pdb_templates_result = pipeline.template_searcher.query(msa_for_templates)
-                elif self.template_searcher.input_format == 'a3m':
-                    uniref90_msa_as_a3m = parsers.convert_stockholm_to_a3m(msa_for_templates)
-                    pdb_templates_result = pipeline.template_searcher.query(uniref90_msa_as_a3m)
+                searcher = pipeline.template_searcher
+                if searcher.input_format == 'sto':
+                    pdb_templates_result = searcher.query(msa_for_templates)
+                elif searcher.input_format == 'a3m':
+                    pdb_templates_result = searcher.query(
+                        parsers.convert_stockholm_to_a3m(msa_for_templates))
+                else:
+                    raise ValueError(f"Unrecognized template input format: {searcher.input_format}")
 
-                #pdb_templates_result = pipeline.template_searcher.query(a3m_lines[0])
-                pdb_template_hits = pipeline.template_searcher.get_template_hits(
-                        output_string=pdb_templates_result, input_sequence=self.sequence)
+                pdb_template_hits = searcher.get_template_hits(
+                    output_string=pdb_templates_result, input_sequence=self.sequence)
 
-                # download required PDB files into a tmp dir
-                #pdb_hits = set([_h.name.split('_')[0] for _h in pdb_template_hits])
-                # limit search up to 100 mmcifs
-                sorted_pdb_template_hits = (
-                            sorted(hits, key=lambda x: x.sum_probs, reverse=True)
-                            if pdb_template_hits and pdb_template_hits[0].sum_probs is not None
-                            else pdb_template_hits
-                        )
-
-                pdb_template_hits = sorted_pdb_template_hits
-                while True:
-                    pdb_hits = set([_h.name.split('_')[0] for _h in pdb_template_hits])
-                    logging.info(f"Template hits {len(pdb_template_hits)} in {len(pdb_hits)} models")
-                    if len(pdb_hits)<100: break
-                    pdb_template_hits = pdb_template_hits[:-10]
-
-                for _pid in pdb_hits:
-                    pdb_id = _pid.lower()
-
-                    url = f"https://files.rcsb.org/download/{pdb_id}.cif"
-                    cif_path = plPath(tmpdir) / f"{pdb_id}.cif"
-
-                    r = requests.get(url, timeout=30)
-                    r.raise_for_status()
-                    cif_path.write_bytes(r.content)
-                    logging.info(f"Downloaded mmCIF from {url}")
-
-                pipeline.template_featurizer._mmcif_dir=tmpdir
+                # The featurizer (OnDemandHmmsearchHitFeaturizer, see
+                # create_individual_features.py) downloads the hits' mmCIFs from
+                # RCSB into its cache — at most 100 entries, failures skipped.
                 templates_result = pipeline.template_featurizer.get_templates(
                     query_sequence=self.sequence, hits=pdb_template_hits)
+                template_feature_dict = templates_result.features
 
         # Remove header lines starting with '#' if present.
         a3m_lines[0] = "\n".join([line for line in a3m_lines[0].splitlines() if not line.startswith("#")])
-        self.feature_dict = build_monomer_feature(self.sequence, unpaired_msa[0], templates_result.features)
+        self.feature_dict = build_monomer_feature(self.sequence, unpaired_msa[0], template_feature_dict)
 
         # Add extra features to make it compatible with pickle features obtaiend from mmseqs2
         template_confidence_scores = self.feature_dict.get('template_confidence_scores', None)

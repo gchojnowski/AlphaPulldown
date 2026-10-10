@@ -29,6 +29,7 @@ from alphapulldown.objects import MonomericObject
 from alphapulldown.utils.file_handling import iter_seqs, parse_csv_file
 from alphapulldown.utils.modelling_setup import create_uniprot_runner
 from alphapulldown.utils import save_meta_data
+from alphapulldown.utils.remote_templates import OnDemandHmmsearchHitFeaturizer
 from types import SimpleNamespace
 
 # Try to import AlphaFold3, but it's optional
@@ -102,6 +103,11 @@ flags.DEFINE_boolean('use_precomputed_msas', False, '')
 flags.DEFINE_boolean('re_search_templates_mmseqs2', False, '')
 flags.DEFINE_bool("use_mmseqs2", False, "")
 flags.DEFINE_bool("use_afdb", False, "")
+flags.DEFINE_bool(
+    "fetch_templates", False,
+    "Download template mmCIFs from RCSB on demand instead of reading a local PDB "
+    "mmCIF mirror. template_mmcif_dir then serves as a download cache (default: "
+    "<output_dir>/template_mmcif_cache). Always on with --use_afdb. hmmsearch only.")
 flags.DEFINE_bool("save_msa_files", False, "")
 flags.DEFINE_bool("skip_existing", False, "")
 flags.DEFINE_string("new_uniclust_dir", None, "")
@@ -164,6 +170,14 @@ def create_arguments(local_custom_template_db=None):
         FLAGS.template_mmcif_dir = FLAGS.template_mmcif_dir or get_database_path("template_mmcif_dir")
         FLAGS.obsolete_pdbs_path = FLAGS.obsolete_pdbs_path or get_database_path("obsolete_pdbs")
     
+    if FLAGS.fetch_templates or FLAGS.use_afdb:
+        # Templates come from RCSB on demand: template_mmcif_dir is a download
+        # cache, not the data_dir mirror (which may not exist, or be read-only).
+        if not FLAGS["template_mmcif_dir"].present:
+            FLAGS.template_mmcif_dir = os.path.join(FLAGS.output_dir, "template_mmcif_cache")
+        if FLAGS.obsolete_pdbs_path and not os.path.isfile(FLAGS.obsolete_pdbs_path):
+            FLAGS.obsolete_pdbs_path = None
+
     if local_custom_template_db:
         FLAGS.pdb_seqres_database_path = os.path.join(local_custom_template_db, "pdb_seqres.txt")
         FLAGS.template_mmcif_dir = os.path.join(local_custom_template_db, "pdb_mmcif", "mmcif_files")
@@ -177,6 +191,16 @@ def check_template_date():
 
 # =================== AlphaFold 2 Feature Creation ===================
 
+def create_hmmsearch_featurizer():
+    """hmmsearch template featurizer; fetches mmCIFs on demand when asked to."""
+    cls = (OnDemandHmmsearchHitFeaturizer if (FLAGS.fetch_templates or FLAGS.use_afdb)
+           else templates.HmmsearchHitFeaturizer)
+    return cls(
+        mmcif_dir=FLAGS.template_mmcif_dir, max_template_date=FLAGS.max_template_date,
+        max_hits=20, kalign_binary_path=FLAGS.kalign_binary_path,
+        obsolete_pdbs_path=FLAGS.obsolete_pdbs_path, release_dates_path=None
+    )
+
 def create_pipeline_af2():
     """Create and configure the AlphaFold2 data pipeline."""
     use_small_bfd = FLAGS.db_preset == "reduced_dbs"
@@ -186,11 +210,7 @@ def create_pipeline_af2():
         template_searcher = None
         template_featuriser = None
     elif FLAGS.use_afdb:
-        template_featuriser = templates.HmmsearchHitFeaturizer(
-            mmcif_dir=FLAGS.template_mmcif_dir, max_template_date=FLAGS.max_template_date,
-            max_hits=20, kalign_binary_path=FLAGS.kalign_binary_path,
-            obsolete_pdbs_path=FLAGS.obsolete_pdbs_path, release_dates_path=None
-        )
+        template_featuriser = create_hmmsearch_featurizer()
         template_searcher = hmmsearch.Hmmsearch(
             binary_path=FLAGS.hmmsearch_binary_path,
             hmmbuild_binary_path=FLAGS.hmmbuild_binary_path,
@@ -201,6 +221,8 @@ def create_pipeline_af2():
         return _pip
     else:
         if FLAGS.use_hhsearch:
+            if FLAGS.fetch_templates:
+                raise ValueError("--fetch_templates works with hmmsearch only, not --use_hhsearch")
             template_searcher = hhsearch.HHSearch(
                 binary_path=FLAGS.hhsearch_binary_path, databases=[FLAGS.pdb70_database_path]
             )
@@ -210,11 +232,7 @@ def create_pipeline_af2():
                 release_dates_path=None, obsolete_pdbs_path=FLAGS.obsolete_pdbs_path
             )
         else:
-            template_featuriser = templates.HmmsearchHitFeaturizer(
-                mmcif_dir=FLAGS.template_mmcif_dir, max_template_date=FLAGS.max_template_date,
-                max_hits=20, kalign_binary_path=FLAGS.kalign_binary_path,
-                obsolete_pdbs_path=FLAGS.obsolete_pdbs_path, release_dates_path=None
-            )
+            template_featuriser = create_hmmsearch_featurizer()
             template_searcher = hmmsearch.Hmmsearch(
                 binary_path=FLAGS.hmmsearch_binary_path,
                 hmmbuild_binary_path=FLAGS.hmmbuild_binary_path,
