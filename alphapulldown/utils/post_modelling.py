@@ -79,9 +79,15 @@ def extract_contacts_from_pickle(file_path):
         ptm = np.mean(data['plddt'], dtype=float)
 
 
-    #expres_probs = 1 / (1 + np.exp(-data['experimentally_resolved']['logits']))   # shape: [37, L]
-    # and per residue...
-    #expres_probs = expres_probs.mean(axis=1)  # shape: [L]
+    # Per-residue confidences, all chains end to end: pLDDT and the probability
+    # that the CA atom (atom37 index 1) is experimentally resolved, which is low
+    # in likely-disordered regions.
+    datadict['plddt'] = np.asarray(data['plddt'], dtype=float)
+    expres = data.get('experimentally_resolved')
+    if isinstance(expres, dict):
+        expres = expres.get('logits')
+    if expres is not None:
+        datadict['experimentally_resolved'] = 1 / (1 + np.exp(-np.asarray(expres, dtype=float)[:, 1]))
     distogram = data.get('distogram', None)
 
     asym_id=[]
@@ -198,7 +204,8 @@ def clusters_from_labels(labels, order):
 
 def _cross_chain_analysis(output_path, contact_dict, make_plots):
     """Cluster models by their interface (Jaccard on cross-chain contact
-    probabilities), write fancy_extras.pkl (+ .json.xz), clusters.png and contacts.json."""
+    probabilities; adds the cluster stats to contact_dict), write clusters.png
+    and contacts.json."""
     dists = weighted_jaccard([contact_dict[k]['target_crosspbty'] for k in contact_dict])
     corr_reordered, order, labels, largest_cluster_frac, consistency = cluster_and_reorder(dists, t=0.2)
     clusters = clusters_from_labels(labels, order)
@@ -207,11 +214,6 @@ def _cross_chain_analysis(output_path, contact_dict, make_plots):
 
     contact_dict['largest_cluster_frac']=largest_cluster_frac
     contact_dict['consistency']=consistency
-
-    with Path(output_path, "fancy_extras.pkl").open("wb") as ofile:
-        pickle.dump(contact_dict, ofile)
-    # Same content as JSON (pickle kept): readable without unpickling.
-    write_json_xz(Path(output_path, "fancy_extras.json.xz"), contact_dict)
 
     # Plot matrix
     if make_plots:
@@ -262,6 +264,14 @@ def post_prediction_process(output_path, compress_pickles=False, remove_pickles=
         _cross_chain_analysis(output_path, contact_dict, make_plots)
     else:
         logging.info("Single-chain prediction: skipping cross-chain contacts and clustering")
+
+    # Per-model extras (pLDDT, experimentally resolved; contacts and cluster
+    # stats for complexes), for monomers too.
+    if contact_dict:
+        with Path(output_path, "fancy_extras.pkl").open("wb") as ofile:
+            pickle.dump(contact_dict, ofile)
+        # Same content as JSON (pickle kept): readable without unpickling.
+        write_json_xz(Path(output_path, "fancy_extras.json.xz"), contact_dict)
 
 
     try:
