@@ -10,6 +10,8 @@ import numpy as np
 import string
 from pathlib import Path
 
+from alphapulldown.utils.json_export import write_json_xz
+
 class distogram_parser:
     """
         extracts predicted contacts from AF2 distograms assuming that 
@@ -43,8 +45,9 @@ class distogram_parser:
 
         d = top_ranked_dgram[1]
 
-        # reparse top ditogram; avoids storing all pickles in memory         
-        with open(fn, 'rb') as ifile:
+        # reparse top ditogram; avoids storing all pickles in memory
+        # (the top-ranked file: `fn` is just the last one the loop looked at)
+        with open(top_ranked_dgram[0], 'rb') as ifile:
             d=pickle.load(ifile)
 
         # Now remove all the original (large) pickles, including the top one
@@ -86,6 +89,10 @@ class distogram_parser:
         out_fn = os.path.join(datadir, f"flat_distogram.pkl")
         with open(out_fn, "wb") as f:
             pickle.dump(output_dict, f)
+        # Same data as JSON (pickle kept); asym_id follows from the chain lengths.
+        write_json_xz(os.path.join(datadir, "flat_distogram.json.xz"),
+                      {"chain_lengths": chain_lens, "chain_ids": chain_ids[:len(chain_lens)],
+                       "below8pbty": below_dist_pbty})
         
         requested_contacts=[]
 

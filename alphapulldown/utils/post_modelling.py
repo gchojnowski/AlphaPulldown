@@ -15,6 +15,7 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 
 from alphapulldown.utils.distogram_parser import distogram_parser
+from alphapulldown.utils.json_export import write_json_xz
 
 
 def compress_file(file_path):
@@ -197,7 +198,7 @@ def clusters_from_labels(labels, order):
 
 def _cross_chain_analysis(output_path, contact_dict, make_plots):
     """Cluster models by their interface (Jaccard on cross-chain contact
-    probabilities), write fancy_extras.pkl, clusters.png and contacts.json."""
+    probabilities), write fancy_extras.pkl (+ .json.xz), clusters.png and contacts.json."""
     dists = weighted_jaccard([contact_dict[k]['target_crosspbty'] for k in contact_dict])
     corr_reordered, order, labels, largest_cluster_frac, consistency = cluster_and_reorder(dists, t=0.2)
     clusters = clusters_from_labels(labels, order)
@@ -209,6 +210,8 @@ def _cross_chain_analysis(output_path, contact_dict, make_plots):
 
     with Path(output_path, "fancy_extras.pkl").open("wb") as ofile:
         pickle.dump(contact_dict, ofile)
+    # Same content as JSON (pickle kept): readable without unpickling.
+    write_json_xz(Path(output_path, "fancy_extras.json.xz"), contact_dict)
 
     # Plot matrix
     if make_plots:
