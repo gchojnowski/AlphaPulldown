@@ -128,7 +128,12 @@ def extract_contacts_from_pickle(file_path):
     datadict['contacts']=requested_contacts
 
 
-    # most-likely cross-chain contacts (<8A)
+    # most-likely cross-chain contacts (<8A); none for a single chain
+    if len(chain_lens) < 2:
+        datadict['target_crosspbty'] = []
+        datadict['partner_crosspbty'] = []
+        return datadict
+
     resids1 = np.where(asym_id==1)
     resids2 = np.where(asym_id==2)
     resids1 = np.asarray(resids1).ravel()
@@ -190,16 +195,9 @@ def clusters_from_labels(labels, order):
 
 # ===========================
 
-def post_prediction_process(output_path, compress_pickles=False, remove_pickles=False, remove_keys=False, make_plots=True):
-    """Process resulted files after the prediction."""
-    print("=====> INFO: keeping distograms and derived data")
-    keys_to_remove = ['aligned_confidence_probs', 'masked_msa']
-
-    contact_dict = {}
-    for file_name in os.listdir(output_path):
-        if "result_model" in file_name and file_name.endswith('.pkl'):
-            contact_dict[file_name] = extract_contacts_from_pickle(os.path.join(output_path, file_name))
-
+def _cross_chain_analysis(output_path, contact_dict, make_plots):
+    """Cluster models by their interface (Jaccard on cross-chain contact
+    probabilities), write fancy_extras.pkl, clusters.png and contacts.json."""
     dists = weighted_jaccard([contact_dict[k]['target_crosspbty'] for k in contact_dict])
     corr_reordered, order, labels, largest_cluster_frac, consistency = cluster_and_reorder(dists, t=0.2)
     clusters = clusters_from_labels(labels, order)
@@ -242,6 +240,26 @@ def post_prediction_process(output_path, compress_pickles=False, remove_pickles=
     print(f"Saving {output_path}/contacts.json with {len(contacts)} contacts")
     with Path(output_path, 'contacts.json').open('w') as ofile:
         ofile.write(json.dumps(contacts))
+
+
+def post_prediction_process(output_path, compress_pickles=False, remove_pickles=False, remove_keys=False, make_plots=True):
+    """Process resulted files after the prediction."""
+    print("=====> INFO: keeping distograms and derived data")
+    keys_to_remove = ['aligned_confidence_probs', 'masked_msa']
+
+    contact_dict = {}
+    for file_name in os.listdir(output_path):
+        if "result_model" in file_name and file_name.endswith('.pkl'):
+            contact_dict[file_name] = extract_contacts_from_pickle(os.path.join(output_path, file_name))
+
+    # Cross-chain analysis (model clustering by interface, contacts) needs at
+    # least two chains; monomer predictions skip it and go on to the pickles.
+    multichain = bool(contact_dict) and all(contact_dict[k]['target_crosspbty'] for k in contact_dict)
+    if multichain:
+        _cross_chain_analysis(output_path, contact_dict, make_plots)
+    else:
+        logging.info("Single-chain prediction: skipping cross-chain contacts and clustering")
+
 
     try:
         # Get the best model from ranking_debug.json
