@@ -20,6 +20,7 @@ import jax.numpy as jnp
 from alphapulldown.utils.plotting import plot_pae_from_matrix
 from alphapulldown.objects import MultimericObject, MonomericObject, ChoppedObject
 from alphapulldown.utils.post_modelling import post_prediction_process
+from alphapulldown.utils.ipsae import cb_coordinates, chain_pair_scores
 #from alphapulldown.utils.calculate_rmsd import calculate_rmsd_and_superpose
 from alphapulldown.utils.modelling_setup import pad_input_features
 from alphafold.relax import relax
@@ -558,6 +559,10 @@ class AlphaFold2Backend(FoldingBackend):
         ranking_confidences = {}
         iptm_scores = {}
         ptm_scores = {}
+        ipsae_scores = {}        # model -> best chain pair (complexes only)
+        ipsae_pairs = {}         # model -> {"A-B": ipSAE, ...}
+        pdockq2_pairs = {}       # model -> {"A-B": pDockQ2, ...}
+        lis_pairs = {}           # model -> {"A-B": LIS, ...}
         multimer_mode = type(multimeric_object) == MultimericObject
         # Read timings.json if exists
         timings_path = os.path.join(output_dir, 'timings.json')
@@ -603,6 +608,26 @@ class AlphaFold2Backend(FoldingBackend):
                 max_pae = prediction_result['max_predicted_aligned_error']
                 _save_pae_json_file(pae, float(max_pae),
                                     output_dir, model_name)
+                # ipSAE, LIS and pDockQ2 per chain pair (chains A, B, ... in
+                # input order), from the PAE, the chain lengths and, for
+                # pDockQ2, the unrelaxed model's C-beta atoms and pLDDT. Never
+                # fatal: the scores are a convenience, the prediction is what
+                # matters.
+                if cmplx:
+                    try:
+                        model = prediction_results[model_name].get('unrelaxed_protein')
+                        cb = (cb_coordinates(model.atom_positions, model.aatype)
+                              if model is not None else None)
+                        pairs = chain_pair_scores(pae, [len(s) for s in prediction_result['seqs']],
+                                                  cb_coords=cb, plddt=prediction_result['plddt'])
+                        if pairs:
+                            ipsae_pairs[model_name] = {k: v['ipsae'] for k, v in pairs.items()}
+                            ipsae_scores[model_name] = max(ipsae_pairs[model_name].values())
+                            lis_pairs[model_name] = {k: v['lis'] for k, v in pairs.items()}
+                            if all('pdockq2' in v for v in pairs.values()):
+                                pdockq2_pairs[model_name] = {k: v['pdockq2'] for k, v in pairs.items()}
+                    except Exception as e:
+                        logging.warning(f"ipSAE/LIS/pDockQ2 not computed for {model_name}: {e}")
 
         # Rank by model confidence.
         ranked_order = [
@@ -622,13 +647,16 @@ class AlphaFold2Backend(FoldingBackend):
             )
 
         # Save ranking_debug.json.
+        ranking = {label: ranking_confidences, 'order': ranked_order,
+                   "iptm" if cmplx else "ptm": iptm_scores if cmplx else ptm_scores}
+        if ipsae_scores:
+            # ipSAE (Dunbrack 2025; utils/ipsae.py), PAE cutoff 10 A: per model
+            # the best chain pair, and every pair; LIS and pDockQ2 per pair.
+            ranking.update({"ipsae": ipsae_scores, "ipsae_pairs": ipsae_pairs, "lis_pairs": lis_pairs})
+            if pdockq2_pairs:
+                ranking["pdockq2_pairs"] = pdockq2_pairs
         with open(ranking_path, 'w') as f:
-            json.dump(
-                {label: ranking_confidences, 'order': ranked_order,
-                 "iptm" if cmplx else "ptm": iptm_scores if cmplx else ptm_scores},
-                f,
-                indent=4
-            )
+            json.dump(ranking, f, indent=4)
 
         # Relax.
         amber_relaxer = relax.AmberRelaxation(
